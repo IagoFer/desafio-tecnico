@@ -126,10 +126,10 @@ class AlunoExportService
                     $end = $enderecos->get($user->id);
 
                     // Formata os dados no DTO misto (user)
-                    $user->cpf = DocumentFormatter::formatCpf($doc->cpf ?? '');
-                    $user->rg = DocumentFormatter::formatRg($doc->rg ?? '');
-                    $user->logradouro = $end->logradouro ?? '';
-                    $user->cep = DocumentFormatter::formatCep($end->cep ?? '');
+                    $user->cpf = DocumentFormatter::formatCpf($doc?->cpf ?? '');
+                    $user->rg = DocumentFormatter::formatRg($doc?->rg ?? '');
+                    $user->logradouro = $end?->logradouro ?? '';
+                    $user->cep = DocumentFormatter::formatCep($end?->cep ?? '');
 
                     $this->writeRow($writer, $user, $mats);
                     $totalProcessed++;

@@ -2,140 +2,113 @@
 
 namespace App\Jobs;
 
-use App\Enums\ResultadoFinal;
 use App\Models\User;
+use App\Services\Export\AlunoExportService;
 use Filament\Notifications\Actions\Action;
 use Filament\Notifications\Notification;
 use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
-use OpenSpout\Common\Entity\Row;
-use OpenSpout\Writer\XLSX\Writer;
-use OpenSpout\Writer\XLSX\Options;
+use Throwable;
 
-class ExportAlunosJob implements ShouldQueue
+class ExportAlunosJob implements ShouldQueue, ShouldBeUnique
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public $timeout = 1200; // 20 minutes max
+    /**
+     * Timeout de 20 minutos (fallback de segurança).
+     */
+    public $timeout = 1200; 
+
+    /**
+     * Resiliência: O job tentará rodar 3 vezes caso caia por deadlock de banco de dados
+     * ou problema momentâneo de rede no Redis.
+     */
+    public int $tries = 3;
+
+    /**
+     * Backoff progressivo: Espera 1min, 2min e 5min antes de retentar.
+     */
+    public array $backoff = [60, 120, 300];
 
     public function __construct(
         protected int $userId
     ) {}
 
-    public function handle(): void
+    /**
+     * O ID único do job. Impede que o Redis aceite 2 jobs do mesmo usuário simultaneamente.
+     */
+    public function uniqueId(): string
     {
-        $fileName = 'alunos_export_' . now()->format('Ymd_His') . '.xlsx';
-        $exportDir = storage_path('app/public/exports');
-        $filePath = $exportDir . '/' . $fileName;
+        return (string) $this->userId;
+    }
 
-        if (!is_dir($exportDir)) {
-            mkdir($exportDir, 0777, true);
-        }
+    /**
+     * Tempo em que o Job é considerado único no Redis (1 hora).
+     */
+    public int $uniqueFor = 3600;
 
-        $options = new Options();
-        $writer = new Writer($options);
-        $writer->openToFile($filePath);
+    /**
+     * Orquestra a execução injetando as dependências necessárias.
+     */
+    public function handle(AlunoExportService $exportService): void
+    {
+        Log::info('Iniciando processamento assíncrono do ExportAlunosJob', ['user_id' => $this->userId]);
 
-        // Header
-        $headerRow = Row::fromValues([
-            'Nome',
-            'E-mail',
-            'Data de Nascimento',
-            'Range de Escolaridade',
-            'Escola',
-            'CPF',
-            'RG',
-            'Logradouro',
-            'CEP',
-            'Aprovações',
-            'Reprovações'
-        ]);
-        $writer->addRow($headerRow);
+        // Delega a responsabilidade massiva para o serviço de domínio
+        $fileName = $exportService->export($this->userId);
 
-        // Process data
-        $users = User::has('matriculas')
-            ->with(['matriculas.escola', 'documento', 'endereco'])
-            ->cursor();
-
-        foreach ($users as $user) {
-            $matriculas = $user->matriculas;
-
-            // Range de Escolaridade
-            $anosLetivos = $matriculas->pluck('ano_letivo')->filter();
-            $rangeEscolaridade = '';
-            if ($anosLetivos->isNotEmpty()) {
-                $rangeEscolaridade = $anosLetivos->min() . '-' . $anosLetivos->max();
-            }
-
-            // Escola (most recent matricula by data_de_criacao)
-            $latestMatricula = $matriculas->sortByDesc('data_de_criacao')->first();
-            $escola = $latestMatricula?->escola?->nome ?? '';
-
-            // CPF
-            $cpf = $user->documento?->cpf ?? '';
-            $cpf = preg_replace('/\D/', '', $cpf);
-            if (preg_match('/^(\d{3})(\d{3})(\d{3})(\d{2})$/', $cpf, $matches)) {
-                $cpf = "{$matches[1]}.{$matches[2]}.{$matches[3]}-{$matches[4]}";
-            }
-
-            // RG
-            $rg = $user->documento?->rg ?? '';
-            $rg = preg_replace('/\D/', '', $rg);
-            if (preg_match('/^(\d{2})(\d{3})(\d{3})(\d{1})$/', $rg, $matches)) {
-                $rg = "{$matches[1]}.{$matches[2]}.{$matches[3]}-{$matches[4]}";
-            } elseif (strlen($rg) > 0) {
-                 // Fallback format if it doesn't match standard SP RG size
-                 $rg = substr($rg, 0, -1) . '-' . substr($rg, -1);
-            }
-
-            // CEP
-            $cep = $user->endereco?->cep ?? '';
-            $cep = preg_replace('/\D/', '', $cep);
-            if (preg_match('/^(\d{5})(\d{3})$/', $cep, $matches)) {
-                $cep = "{$matches[1]}-{$matches[2]}";
-            }
-
-            // Aprovações / Reprovações
-            $aprovacoes = $matriculas->where('resultado_final', ResultadoFinal::Aprovado)->count();
-            $reprovacoes = $matriculas->where('resultado_final', ResultadoFinal::Reprovado)->count();
-
-            $row = Row::fromValues([
-                $user->name,
-                $user->email,
-                $user->data_de_nascimento?->format('d/m/Y') ?? '',
-                $rangeEscolaridade,
-                $escola,
-                $cpf,
-                $rg,
-                $user->endereco?->logradouro ?? '',
-                $cep,
-                $aprovacoes,
-                $reprovacoes,
-            ]);
-
-            $writer->addRow($row);
-        }
-
-        $writer->close();
-
-        // Send Notification
+        // Envia Notificação de Sucesso
         $recipient = User::find($this->userId);
         if ($recipient) {
             Notification::make()
-                ->title('Exportação Finalizada!')
-                ->body('O arquivo Excel com os dados dos alunos foi gerado com sucesso.')
+                ->title('Exportação de Alunos Finalizada!')
+                ->body('Sua planilha Excel foi gerada com sucesso.')
                 ->success()
                 ->actions([
-                    Action::make('Baixar Planilha')
+                    Action::make('download')
+                        ->label('Baixar Planilha')
                         ->url(Storage::url('exports/' . $fileName))
                         ->button()
+                        ->markAsRead()
                         ->openUrlInNewTab(),
                 ])
                 ->sendToDatabase($recipient);
         }
+
+        // Libera a trava de segurança para o usuário poder solicitar nova exportação
+        Cache::forget("export_alunos_in_progress_{$this->userId}");
+    }
+
+    /**
+     * Tratamento de Falha Crítica.
+     * Acionado quando as 3 tentativas esgotarem (tries).
+     */
+    public function failed(Throwable $exception): void
+    {
+        Log::error('Falha crítica e definitiva na exportação de alunos', [
+            'user_id' => $this->userId,
+            'erro' => $exception->getMessage(),
+            'linha' => $exception->getLine(),
+            'arquivo' => $exception->getFile()
+        ]);
+        
+        $recipient = User::find($this->userId);
+        if ($recipient) {
+            Notification::make()
+                ->title('Erro na Exportação de Alunos')
+                ->body('Ocorreu um problema ao gerar sua planilha. Por favor, entre em contato com o suporte.')
+                ->danger()
+                ->sendToDatabase($recipient);
+        }
+
+        // Garante que a trava seja liberada em caso de falha fatal
+        Cache::forget("export_alunos_in_progress_{$this->userId}");
     }
 }

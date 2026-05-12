@@ -13,15 +13,43 @@ services:
       - .:/app:delegated
     networks:
       - local
+    depends_on:
+      redis:
+        condition: service_healthy
+      database:
+        condition: service_healthy
     deploy:
       resources:
         limits:
           cpus: '1'
           memory: 256M
+
+  queue:
+    image: kooldev/php:8.3-nginx
+    command: ["php", "artisan", "queue:work", "redis", "--sleep=3", "--tries=3", "--max-time=3600"]
+    restart: unless-stopped
+    environment:
+      - USER_ID=1000
+      - GROUP_ID=1000
+    volumes:
+      - .:/app:delegated
+    networks:
+      - local
+    depends_on:
+      redis:
+        condition: service_healthy
+      database:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+
   database:
     image: mysql:8.4.7
     ports:
-      - ${KOOL_DATABASE_PORT:-3306}:3306
+      - ${KOOL_DATABASE_PORT:-3307}:3306
     environment:
       MYSQL_ROOT_PASSWORD: ${DB_PASSWORD-rootpass}
       MYSQL_DATABASE: ${DB_DATABASE-database}
@@ -37,7 +65,11 @@ services:
     networks:
       - local
     healthcheck:
-      test: mysqladmin -p${DB_PASSWORD-pass} ping
+      test: mysqladmin -p${DB_PASSWORD-pass} ping -h localhost
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   node:
     image: kooldev/node:20
     command: [ "npm", "run", "dev" ]
@@ -49,6 +81,26 @@ services:
       - local
     depends_on:
       - app
+
+  redis:
+    image: redis:alpine
+    ports:
+      - "${KOOL_REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis:/data:delegated
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
+    networks:
+      - local
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 #
 # Networks definitions
 #
@@ -56,3 +108,4 @@ networks:
   local:
 volumes:
   database:
+  redis:

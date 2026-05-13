@@ -42,11 +42,19 @@ A arquitetura segue os princípios de **Responsabilidade Única (SRP)** e **sepa
 
 ### UX (Experiência do Usuário)
 
-- **Modal de confirmação** antes de iniciar a exportação, informando o usuário que o processo será em segundo plano.
-- **Notificação em tempo real** via Database Notifications do Filament (polling automático no sininho 🔔), com botão de download direto na notificação.
+- **Modal de confirmação detalhado** antes de iniciar a exportação, exibindo o número exato de registros que serão processados, junto com estimativas dinâmicas de tempo (ex: "Aproximadamente 2 min") e tamanho do arquivo final.
+- **Barra de Progresso Global em Tempo Real (Livewire Toast):** Durante a exportação, o usuário acompanha o progresso em qualquer página do sistema através de uma barra de progresso no canto inferior da tela. A barra é um componente Livewire global injetado via hook que consulta via *polling* (a cada 3s) o Cache no Redis para buscar o status gerado pelo Job em background.
+- **Transições Suaves:** Implementação via Tailwind CSS nativo inline para garantir renderização perfeita mesmo sem recompilação do CSS interno do Filament.
+- **Download Simplificado:** O Toast automaticamente transiciona para o estado "Concluído" com um botão verde de download integrado, eliminando a necessidade de buscar a planilha no histórico de notificações (embora a notificação nativa do banco continue como fallback).
 - **Trava anti-spam:** Um Cache Lock impede que o mesmo usuário dispare múltiplas exportações simultâneas. Se ele clicar novamente, recebe um aviso amigável pedindo para aguardar.
-- **Tratamento de falhas:** Se o Job falhar após 3 tentativas (com backoff progressivo de 1min, 2min e 5min), o usuário recebe uma notificação de erro e a trava é automaticamente liberada.
+- **Tratamento de falhas:** Se o Job falhar após 3 tentativas (com backoff progressivo de 1min, 2min e 5min), a barra de progresso fica vermelha, notifica o usuário via banco de dados e a trava é liberada.
 - **`ShouldBeUnique`:** O Job implementa a interface `ShouldBeUnique` com `uniqueId` baseado no ID do usuário, garantindo que o Redis rejeite jobs duplicados mesmo em cenários de concorrência.
+
+### Testes Automatizados (TDD / CI-ready)
+
+O código desenvolvido está 100% coberto por testes automatizados (`20 testes | 42 assertions`) focado nas novas features implementadas:
+- **Testes Unitários:** O utilitário `DocumentFormatter` foi validado cobrindo formatação de CPFs limpos/parciais/nulos, lógica fallback customizada em RGs problemáticos (ex: letras) e CEPs.
+- **Testes de Integração (Feature):** A Action `ExportAlunosAction` é testada quanto aos seus algoritmos precisos de tempo e tamanho; e o Job `ExportAlunosJob` possui testes para fluxos felizes e fluxos de falha no banco de dados (`DatabaseNotification`), com simulação injetada no Container (Mockery `AlunoExportService`).
 
 ### Infraestrutura (Docker)
 

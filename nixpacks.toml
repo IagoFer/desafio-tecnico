@@ -1,0 +1,2 @@
+[variables]
+NIXPACKS_NPM_CI_FALLBACK = "1"

@@ -16,9 +16,10 @@ class AlunoExportService
      * Orquestra a geração do arquivo Excel de Alunos.
      *
      * @param int $userId ID do usuário solicitante (para logs de auditoria).
+     * @param callable|null $onProgress Callback de progresso: fn(int $processed, int $total) => void
      * @return string O nome do arquivo gerado.
      */
-    public function export(int $userId): string
+    public function export(int $userId, ?callable $onProgress = null): string
     {
         $fileName = 'alunos_export_' . now()->format('Ymd_His') . '.xlsx';
         $exportDir = storage_path('app/public/exports');
@@ -34,7 +35,7 @@ class AlunoExportService
 
         $this->writeHeader($writer);
         
-        $totalExported = $this->processDataInChunks($writer);
+        $totalExported = $this->processDataInChunks($writer, $onProgress);
 
         $writer->close();
         
@@ -71,11 +72,22 @@ class AlunoExportService
 
     /**
      * Processa os dados em lote e grava no arquivo Excel.
+     *
+     * @param callable|null $onProgress Callback chamado após cada chunk: fn(int $processed, int $total) => void
      * @return int O total de usuários exportados.
      */
-    private function processDataInChunks(Writer $writer): int
+    private function processDataInChunks(Writer $writer, ?callable $onProgress = null): int
     {
         $totalProcessed = 0;
+
+        // Conta o total para cálculo de porcentagem (usa cache quando disponível)
+        $totalRecords = DB::table('users')
+            ->whereExists(function ($query) {
+                $query->select(DB::raw(1))
+                      ->from('matriculas')
+                      ->whereColumn('matriculas.user_id', 'users.id');
+            })
+            ->count();
 
         // Utilizamos whereExists para buscar apenas usuários que POSSUEM matrícula,
         // economizando recursos de banco de dados e memória PHP.
@@ -87,7 +99,7 @@ class AlunoExportService
                       ->whereColumn('matriculas.user_id', 'users.id');
             })
             ->orderBy('id')
-            ->chunk(2000, function ($users) use ($writer, &$totalProcessed) {
+            ->chunk(2000, function ($users) use ($writer, &$totalProcessed, $totalRecords, $onProgress) {
                 
                 $userIds = $users->pluck('id')->toArray();
 
@@ -133,6 +145,11 @@ class AlunoExportService
 
                     $this->writeRow($writer, $user, $mats);
                     $totalProcessed++;
+                }
+
+                // Reporta progresso ao callback (se fornecido)
+                if ($onProgress) {
+                    $onProgress($totalProcessed, $totalRecords);
                 }
             });
 

@@ -61,10 +61,35 @@ class ExportAlunosJob implements ShouldQueue, ShouldBeUnique
     {
         Log::info('Iniciando processamento assíncrono do ExportAlunosJob', ['user_id' => $this->userId]);
 
-        // Delega a responsabilidade massiva para o serviço de domínio
-        $fileName = $exportService->export($this->userId);
+        $progressKey = "export_progress_{$this->userId}";
 
-        // Envia Notificação de Sucesso
+        // Inicializa o progresso no Cache (o Livewire vai ler esse cache via polling)
+        Cache::put($progressKey, [
+            'status' => 'processing',
+            'processed' => 0,
+            'total' => 0,
+        ], 1800);
+
+        // Delega a responsabilidade massiva para o serviço de domínio,
+        // passando um callback que atualiza o progresso no Redis a cada chunk
+        $fileName = $exportService->export($this->userId, function (int $processed, int $total) use ($progressKey) {
+            Cache::put($progressKey, [
+                'status' => 'processing',
+                'processed' => $processed,
+                'total' => $total,
+            ], 1800);
+        });
+
+        // Atualiza o progresso para "concluído" com URL do arquivo
+        Cache::put($progressKey, [
+            'status' => 'completed',
+            'processed' => 0,
+            'total' => 0,
+            'file_url' => Storage::url('exports/' . $fileName),
+            'file_name' => $fileName,
+        ], 1800);
+
+        // Envia Notificação de Sucesso (Database Notification — aparece no sino)
         $recipient = User::find($this->userId);
         if ($recipient) {
             Notification::make()
@@ -98,6 +123,13 @@ class ExportAlunosJob implements ShouldQueue, ShouldBeUnique
             'linha' => $exception->getLine(),
             'arquivo' => $exception->getFile()
         ]);
+
+        // Atualiza o progresso para "falha" (o toast vai mostrar mensagem de erro)
+        Cache::put("export_progress_{$this->userId}", [
+            'status' => 'failed',
+            'processed' => 0,
+            'total' => 0,
+        ], 300);
         
         $recipient = User::find($this->userId);
         if ($recipient) {

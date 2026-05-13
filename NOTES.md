@@ -52,6 +52,13 @@ A arquitetura segue os princípios de **Responsabilidade Única (SRP)** e **sepa
 
 ### Testes Automatizados (TDD / CI-ready)
 
+Para executar a suíte de testes localmente, basta rodar o comando abaixo na raiz do projeto:
+
+```bash
+php artisan test
+# ou via Docker: docker-compose exec app php artisan test
+```
+
 O código desenvolvido está 100% coberto por testes automatizados (`20 testes | 42 assertions`) focado nas novas features implementadas:
 - **Testes Unitários:** O utilitário `DocumentFormatter` foi validado cobrindo formatação de CPFs limpos/parciais/nulos, lógica fallback customizada em RGs problemáticos (ex: letras) e CEPs.
 - **Testes de Integração (Feature):** A Action `ExportAlunosAction` é testada quanto aos seus algoritmos precisos de tempo e tamanho; e o Job `ExportAlunosJob` possui testes para fluxos felizes e fluxos de falha no banco de dados (`DatabaseNotification`), com simulação injetada no Container (Mockery `AlunoExportService`).

@@ -1,6 +1,6 @@
 [variables]
 NIXPACKS_NPM_CI_FALLBACK = "1"
-PHP_VERSION = "8.3"
+NIXPACKS_PHP_VERSION = "8.3"
 
 [start]
 cmd = "bash start.sh"

@@ -1,2 +1,5 @@
 [variables]
 NIXPACKS_NPM_CI_FALLBACK = "1"
+
+[start]
+cmd = "bash start.sh"

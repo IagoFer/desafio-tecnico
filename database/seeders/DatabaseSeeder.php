@@ -50,7 +50,8 @@ class DatabaseSeeder extends Seeder
         $statuses = array_column(StatusMatricula::cases(), 'value');
         $resultados = array_column(ResultadoFinal::cases(), 'value');
 
-        $totalUsers = 200000;
+        $totalUsers = (int) env('SEED_TOTAL_STUDENTS', 200000);
+        $totalNonStudents = (int) env('SEED_TOTAL_NON_STUDENTS', 100000);
         $chunkSize = 5000;
         $password = Hash::make('password');
 
@@ -128,8 +129,7 @@ class DatabaseSeeder extends Seeder
             $this->command->info('Inserted ' . ($i + $chunkSize) . ' students and their enrollments.');
         }
 
-        $this->command->info('Creating 100000 non-student users...');
-        $totalNonStudents = 100000;
+        $this->command->info("Creating {$totalNonStudents} non-student users...");
         $startId = $totalUsers + 2;
         for ($i = 0; $i < $totalNonStudents; $i += $chunkSize) {
             $usersChunk = [];

@@ -29,14 +29,31 @@ class ExportAlunosAction extends Action
             ->modalIcon('heroicon-o-arrow-down-tray')
             ->modalWidth('lg')
             ->modalSubmitActionLabel('Iniciar exportação')
-            ->modalContent(function () {
-                $count = $this->getAlunosCount();
-                $estimatedTime = $this->calculateEstimatedTime($count);
-                $estimatedSize = $this->calculateEstimatedSize($count);
+            ->form([
+                \Filament\Forms\Components\Select::make('filter')
+                    ->label('Quais alunos deseja exportar?')
+                    ->options([
+                        'with_matricula' => 'Apenas alunos com matrícula',
+                        'without_matricula' => 'Apenas alunos sem matrícula',
+                        'all' => 'Todos os registros (Alunos e não alunos)',
+                    ])
+                    ->default('with_matricula')
+                    ->native(false)
+                    ->required()
+                    ->live(),
 
-                return view('filament.modals.export-info', compact('count', 'estimatedTime', 'estimatedSize'));
-            })
-            ->action(function () {
+                \Filament\Forms\Components\Placeholder::make('statistics')
+                    ->label('')
+                    ->content(function ($get) {
+                        $filter = $get('filter') ?? 'with_matricula';
+                        $count = $this->getAlunosCount($filter);
+                        $estimatedTime = $this->calculateEstimatedTime($count);
+                        $estimatedSize = $this->calculateEstimatedSize($count);
+
+                        return view('filament.modals.export-info', compact('count', 'estimatedTime', 'estimatedSize'));
+                    }),
+            ])
+            ->action(function (array $data) {
                 $userId = Auth::id();
                 $cacheKey = "export_alunos_in_progress_{$userId}";
 
@@ -54,7 +71,10 @@ class ExportAlunosAction extends Action
                 // Cria o Lock com expiração de segurança de 30 minutos (caso o job falhe fatalmente sem passar no failed)
                 Cache::put($cacheKey, true, now()->addMinutes(30));
 
-                dispatch(new ExportAlunosJob($userId));
+                $filter = $data['filter'] ?? 'with_matricula';
+                $total = $this->getAlunosCount($filter);
+
+                dispatch(new ExportAlunosJob($userId, $filter, $total));
 
                 Notification::make()
                     ->title('Exportação iniciada!')
@@ -66,19 +86,28 @@ class ExportAlunosAction extends Action
     }
 
     /**
-     * Conta o total de alunos com matrícula ativa, com cache de 5 minutos.
-     * Evita recalcular a cada abertura do modal em janelas consecutivas.
+     * Conta o total de alunos baseado no filtro escolhido.
      */
-    private function getAlunosCount(): int
+    private function getAlunosCount(string $filter): int
     {
-        return Cache::remember('export_alunos_count', 300, function () {
-            return DB::table('users')
-                ->whereExists(function ($query) {
-                    $query->select(DB::raw(1))
-                          ->from('matriculas')
-                          ->whereColumn('matriculas.user_id', 'users.id');
-                })
-                ->count();
+        return Cache::remember("export_alunos_count_{$filter}", 300, function () use ($filter) {
+            $query = DB::table('users');
+
+            if ($filter === 'with_matricula') {
+                $query->whereExists(function ($q) {
+                    $q->select(DB::raw(1))
+                      ->from('matriculas')
+                      ->whereColumn('matriculas.user_id', 'users.id');
+                });
+            } elseif ($filter === 'without_matricula') {
+                $query->whereNotExists(function ($q) {
+                    $q->select(DB::raw(1))
+                      ->from('matriculas')
+                      ->whereColumn('matriculas.user_id', 'users.id');
+                });
+            }
+
+            return $query->count();
         });
     }
 

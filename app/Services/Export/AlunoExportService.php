@@ -16,10 +16,12 @@ class AlunoExportService
      * Orquestra a geração do arquivo Excel de Alunos.
      *
      * @param int $userId ID do usuário solicitante (para logs de auditoria).
+     * @param string $filter Tipo de filtro: 'with_matricula', 'without_matricula', 'all'.
+     * @param int $total Total pré-calculado de registros (opcional).
      * @param callable|null $onProgress Callback de progresso: fn(int $processed, int $total) => void
      * @return string O nome do arquivo gerado.
      */
-    public function export(int $userId, ?callable $onProgress = null): string
+    public function export(int $userId, string $filter = 'with_matricula', int $total = 0, ?callable $onProgress = null): string
     {
         $fileName = 'alunos_export_' . now()->format('Ymd_His') . '.xlsx';
         $exportDir = storage_path('app/public/exports');
@@ -35,12 +37,13 @@ class AlunoExportService
 
         $this->writeHeader($writer);
         
-        $totalExported = $this->processDataInChunks($writer, $onProgress);
+        $totalExported = $this->processDataInChunks($writer, $filter, $total, $onProgress);
 
         $writer->close();
         
         Log::info('Serviço de exportação concluído.', [
             'solicitado_por' => $userId,
+            'filtro' => $filter,
             'arquivo' => $fileName,
             'total_registros_exportados' => $totalExported,
             'pico_memoria_mb' => round(memory_get_peak_usage(true) / 1048576, 2)
@@ -73,31 +76,40 @@ class AlunoExportService
     /**
      * Processa os dados em lote e grava no arquivo Excel.
      *
+     * @param string $filter
+     * @param int $totalRecords
      * @param callable|null $onProgress Callback chamado após cada chunk: fn(int $processed, int $total) => void
      * @return int O total de usuários exportados.
      */
-    private function processDataInChunks(Writer $writer, ?callable $onProgress = null): int
+    private function processDataInChunks(Writer $writer, string $filter = 'with_matricula', int $totalRecords = 0, ?callable $onProgress = null): int
     {
         $totalProcessed = 0;
 
-        // Conta o total para cálculo de porcentagem (usa cache quando disponível)
-        $totalRecords = DB::table('users')
-            ->whereExists(function ($query) {
-                $query->select(DB::raw(1))
-                      ->from('matriculas')
-                      ->whereColumn('matriculas.user_id', 'users.id');
-            })
-            ->count();
+        // Base da Query
+        $query = DB::table('users');
 
-        // Utilizamos whereExists para buscar apenas usuários que POSSUEM matrícula,
-        // economizando recursos de banco de dados e memória PHP.
-        DB::table('users')
-            ->select('id', 'name', 'email', 'data_de_nascimento')
-            ->whereExists(function ($query) {
-                $query->select(DB::raw(1))
-                      ->from('matriculas')
-                      ->whereColumn('matriculas.user_id', 'users.id');
-            })
+        // Aplica o filtro de existência de matrícula
+        if ($filter === 'with_matricula') {
+            $query->whereExists(function ($q) {
+                $q->select(DB::raw(1))
+                  ->from('matriculas')
+                  ->whereColumn('matriculas.user_id', 'users.id');
+            });
+        } elseif ($filter === 'without_matricula') {
+            $query->whereNotExists(function ($q) {
+                $q->select(DB::raw(1))
+                  ->from('matriculas')
+                  ->whereColumn('matriculas.user_id', 'users.id');
+            });
+        }
+
+        // Se o total não foi passado, calcula agora (fallback de segurança)
+        if ($totalRecords <= 0) {
+            $totalRecords = $query->count();
+        }
+
+        // Processamento em Chunks
+        $query->select('id', 'name', 'email', 'data_de_nascimento')
             ->orderBy('id')
             ->chunk(2000, function ($users) use ($writer, &$totalProcessed, $totalRecords, $onProgress) {
                 
@@ -129,10 +141,6 @@ class AlunoExportService
 
                 foreach ($users as $user) {
                     $mats = $matriculasPorUsuario[$user->id] ?? [];
-                    
-                    if (empty($mats)) {
-                        continue; // Fallback, mas o whereExists já deve garantir isso.
-                    }
 
                     $doc = $documentos->get($user->id);
                     $end = $enderecos->get($user->id);
@@ -168,7 +176,7 @@ class AlunoExportService
         $rangeEscolaridade = empty($anosLetivos) ? '' : min($anosLetivos) . '-' . max($anosLetivos);
 
         // Escola da matrícula mais recente
-        $escola = $matriculas[0]->escola_nome ?? '';
+        $escola = isset($matriculas[0]) ? ($matriculas[0]->escola_nome ?? '') : '';
 
         // Contagem de Aprovações e Reprovações
         $aprovacoes = count(array_filter($matriculas, fn($m) => $m->resultado_final === 'aprovado'));

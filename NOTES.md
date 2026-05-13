@@ -49,6 +49,8 @@ A arquitetura segue os princípios de **Responsabilidade Única (SRP)** e **sepa
 - **Trava anti-spam:** Um Cache Lock impede que o mesmo usuário dispare múltiplas exportações simultâneas. Se ele clicar novamente, recebe um aviso amigável pedindo para aguardar.
 - **Tratamento de falhas:** Se o Job falhar após 3 tentativas (com backoff progressivo de 1min, 2min e 5min), a barra de progresso fica vermelha, notifica o usuário via banco de dados e a trava é liberada.
 - **`ShouldBeUnique`:** O Job implementa a interface `ShouldBeUnique` com `uniqueId` baseado no ID do usuário, garantindo que o Redis rejeite jobs duplicados mesmo em cenários de concorrência.
+- **Filtro de Matrícula Interativo:** Identificamos que o código original utilizava um filtro global rígido no `getEloquentQuery` que ocultava alunos sem matrícula, causando erros 404 ao cadastrar novos registros. Refatoramos essa lógica removendo a restrição global e implementando um `TernaryFilter` estilizado na interface. Isso permite que o gestor visualize todos os alunos por padrão e utilize o filtro apenas quando necessário, mantendo a integridade do fluxo de criação e edição.
+- **Filtros de Exportação Parametrizáveis (BI):** O modal de exportação foi evoluído para permitir que o usuário escolha entre exportar "Apenas Matriculados", "Apenas Sem Matrícula" ou "Todos". O formulário do modal é **reativo**: ao trocar o filtro, o sistema recalcula instantaneamente o tempo estimado e o tamanho do arquivo, oferecendo uma experiência em tempo real.
 
 ### Testes Automatizados (TDD / CI-ready)
 
@@ -86,8 +88,14 @@ Para contornar as limitações do plano gratuito do Railway (que não permite co
 | `app/Jobs/ExportAlunosJob.php` | **Modificado** | Refatorado com ShouldBeUnique, retries, backoff e tratamento de falhas |
 | `app/Services/Export/AlunoExportService.php` | **Novo** | Service de domínio com chunking, Query Builder e streaming OpenSpout |
 | `app/Support/Formatters/DocumentFormatter.php` | **Novo** | Formatação de CPF, RG e CEP com máscaras via Regex |
-| `app/Filament/Resources/UserResource.php` | **Modificado** | Adicionado `modelLabel`, `deferLoading` e filtro `has('matriculas')` |
+| `app/Livewire/ExportProgressToast.php` | **Novo** | Componente Livewire para barra de progresso em tempo real |
+| `resources/views/livewire/export-progress-toast.blade.php` | **Novo** | Interface da barra de progresso com estilos CSS inline para portabilidade |
+| `app/Providers/Filament/AdminPanelProvider.php` | **Modificado** | Injeção do componente de progresso no layout global do Filament |
+| `app/Filament/Resources/UserResource.php` | **Modificado** | Adicionado `modelLabel`, `deferLoading` e Filtro Ternário customizado |
 | `app/Filament/Resources/UserResource/Pages/ListUsers.php` | **Modificado** | Integração da ExportAlunosAction no cabeçalho |
+| `start.sh` | **Novo** | Script de orquestração para rodar Worker e Web no mesmo contêiner (Railway) |
+| `nixpacks.toml` | **Novo** | Configuração do builder Nixpacks para execução do script de inicialização |
 | `docker-compose.yml` | **Modificado** | Adicionado serviço `queue`, healthchecks e limites de recursos |
 | `.env` / `.env.example` | **Modificado** | Configuração de Redis para cache, sessão e fila |
 | `config/app.php` | **Modificado** | Locale padrão alterado para `pt_BR` |
+| `database/seeders/DatabaseSeeder.php` | **Modificado** | Parametrização dinâmica do volume de dados via variável de ambiente |

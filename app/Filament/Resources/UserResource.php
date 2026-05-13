@@ -68,7 +68,17 @@ class UserResource extends Resource
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
-                //
+                Tables\Filters\TernaryFilter::make('has_matriculas')
+                    ->label('Matrícula')
+                    ->placeholder('Todos os Alunos')
+                    ->trueLabel('Alunos com Matrícula')
+                    ->falseLabel('Alunos sem Matrícula')
+                    ->native(false)
+                    ->queries(
+                        true: fn (Builder $query) => $query->has('matriculas'),
+                        false: fn (Builder $query) => $query->doesntHave('matriculas'),
+                        blank: fn (Builder $query) => $query,
+                    )
             ])
             ->actions([
                 Tables\Actions\EditAction::make(),
@@ -85,11 +95,6 @@ class UserResource extends Resource
         return [
             RelationManagers\MatriculasRelationManager::class,
         ];
-    }
-
-    public static function getEloquentQuery(): Builder
-    {
-        return parent::getEloquentQuery()->has('matriculas');
     }
 
     public static function getPages(): array

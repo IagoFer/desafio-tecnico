@@ -38,7 +38,9 @@ class ExportAlunosJob implements ShouldQueue, ShouldBeUnique
     public array $backoff = [60, 120, 300];
 
     public function __construct(
-        protected int $userId
+        protected int $userId,
+        protected string $filter = 'with_matricula',
+        protected int $total = 0
     ) {}
 
     /**
@@ -63,16 +65,16 @@ class ExportAlunosJob implements ShouldQueue, ShouldBeUnique
 
         $progressKey = "export_progress_{$this->userId}";
 
-        // Inicializa o progresso no Cache (o Livewire vai ler esse cache via polling)
+        // Inicializa o progresso no Cache com o total já conhecido
         Cache::put($progressKey, [
             'status' => 'processing',
             'processed' => 0,
-            'total' => 0,
+            'total' => $this->total,
         ], 1800);
 
         // Delega a responsabilidade massiva para o serviço de domínio,
-        // passando um callback que atualiza o progresso no Redis a cada chunk
-        $fileName = $exportService->export($this->userId, function (int $processed, int $total) use ($progressKey) {
+        // passando o total para evitar recontagem e um callback para progresso
+        $fileName = $exportService->export($this->userId, $this->filter, $this->total, function (int $processed, int $total) use ($progressKey) {
             Cache::put($progressKey, [
                 'status' => 'processing',
                 'processed' => $processed,

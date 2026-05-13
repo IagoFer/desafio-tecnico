@@ -2,7 +2,7 @@
 
 ## Como Usar a Exportação
 
-1. Acesse o painel Filament em `http://localhost/admin`
+1. Acesse o painel Filament em produção no Railway: [https://desafio-tecnico-production-2327.up.railway.app/admin/login](https://desafio-tecnico-production-2327.up.railway.app/admin/login) (Ou localmente via `http://localhost/admin`)
 2. Faça login com `admin@admin.com` / `admin`
 3. Na listagem de **Alunos**, clique no botão **"Exportar Alunos"** (ícone verde no cabeçalho)
 4. Confirme no modal de confirmação clicando em **"Gerar planilha"**
@@ -61,6 +61,13 @@ O código desenvolvido está 100% coberto por testes automatizados (`20 testes |
 - **Worker isolado:** O `docker-compose.yml` possui um serviço `queue` dedicado exclusivamente ao processamento de filas, separado do servidor web (`app`). Isso garante que a exportação pesada não impacte a performance do painel.
 - **Healthchecks:** MySQL e Redis possuem healthchecks configurados. Os serviços `app` e `queue` só iniciam após a confirmação de que as dependências estão saudáveis (`service_healthy`).
 - **Redis centralizado:** Cache, sessões e filas utilizam Redis, eliminando a dependência de tabelas de banco de dados para gerenciamento de estado temporário.
+
+### Infraestrutura de Produção (Railway / Nixpacks)
+
+Para contornar as limitações do plano gratuito do Railway (que não permite compartilhar volumes de disco persistentes entre serviços diferentes), a arquitetura de produção foi adaptada:
+- **Deploy Unificado:** O serviço Web e o Worker rodam dentro do mesmo contêiner. Isso garante que o arquivo Excel gerado em background pelo Worker seja instantaneamente acessível para download pelo servidor Web através do disco compartilhado.
+- **Script `start.sh` Customizado:** Foi implementado um script via `nixpacks.toml` que prepara os atalhos (`storage:link`), sobe o Worker silenciosamente em background (`queue:work redis &`) e inicia o servidor web.
+- **Parametrização de Carga (Seeder):** O `DatabaseSeeder` foi parametrizado com variáveis de ambiente (`SEED_TOTAL_STUDENTS`) para permitir que testes de implantação utilizem uma volumetria segura para a memória do MySQL Cloud, mas garantindo que o avaliador possa testar os 200 mil originais via Docker localmente.
 
 ---
 
